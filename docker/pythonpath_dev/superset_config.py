@@ -135,11 +135,11 @@ THEME = {
     "fontFamilyCode": "'Fira Code', 'Courier New', monospace",
     "transitionTiming": 0.3,
     "brandIconMaxWidth": 37,
-    "fontSizeXS": "8",
-    "fontSizeXXL": "28",
+    "fontSizeXS": "10",
+    "fontSizeXXL": "32",
     "fontWeightNormal": "400",
     "fontWeightLight": "300",
-    "fontWeightStrong": 500,
+    "fontWeightStrong": 600,
     "colorBgElevated": "#fafafa"
   },
   "algorithm": "default"
