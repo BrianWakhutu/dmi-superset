@@ -108,6 +108,8 @@ import japan from './countries/japan.geojson';
 import jordan from './countries/jordan.geojson';
 import kazakhstan from './countries/kazakhstan.geojson';
 import kenya from './countries/kenya.geojson';
+import kenya_counties from './countries/kenya_counties.geojson';
+import kenya_subcounties from './countries/kenya_subcounties.geojson';
 import korea from './countries/korea.geojson';
 import kuwait from './countries/kuwait.geojson';
 import kyrgyzstan from './countries/kyrgyzstan.geojson';
@@ -311,6 +313,8 @@ export const countries = {
   jordan,
   kazakhstan,
   kenya,
+  kenya_counties,
+  kenya_subcounties,
   korea,
   kuwait,
   kyrgyzstan,

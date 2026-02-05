@@ -105,7 +105,58 @@ class CeleryConfig:
 
 CELERY_CONFIG = CeleryConfig
 
-FEATURE_FLAGS = {"ALERT_REPORTS": True, "DATASET_FOLDERS": True}
+TALISMAN_ENABLED = False
+WTF_CSRF_ENABLED = False
+FEATURE_FLAGS = {
+    "ALERT_REPORTS": True, 
+    "DATASET_FOLDERS": True,
+    "ENABLE_TEMPLATE_PROCESSING": True,
+    "ENABLE_REACT_CRUD_VIEWS": True,
+    "EMBEDDED_SUPERSET": True ,
+    "ALLOW_ADHOC_SUBQUERY" : True, #Allow custom sql metrics
+    "ENABLE_JAVASCRIPT_CONTROLS": True,
+    "THEME_ALLOW_THEME_EDITOR_BETA": False               
+}
+THEME = {
+"token": {
+    "borderRadius": 4,
+    "brandLogoAlt": "Apache Superset",
+    "brandLogoUrl": "/static/assets/images/superset-logo-horiz.png",
+    "brandLogoMargin": "18px",
+    "brandLogoHref": "/",
+    "brandLogoHeight": "24px",
+    "colorPrimary": "#2893B3",
+    "colorLink": "#2893B3",
+    "colorError": "#e04355",
+    "colorWarning": "#fcc700",
+    "colorSuccess": "#5ac189",
+    "colorInfo": "#66bcfe",
+    "fontFamily": "'Inter', Helvetica, Arial",
+    "fontFamilyCode": "'Fira Code', 'Courier New', monospace",
+    "transitionTiming": 0.3,
+    "brandIconMaxWidth": 37,
+    "fontSizeXS": "8",
+    "fontSizeXXL": "28",
+    "fontWeightNormal": "400",
+    "fontWeightLight": "300",
+    "fontWeightStrong": 500,
+    "colorBgElevated": "#fafafa"
+  },
+  "algorithm": "default"
+}
+
+PUBLIC_ROLE_LIKE = "Gamma"
+ENABLE_PROXY_FIX = True
+HTTP_HEADERS = {}
+ENABLE_CORS = True
+CORS_OPTIONS = {
+ 'supports_credentials': True,
+ 'allow_headers': ['*'],
+ 'resources':['*'],
+ 'origins': ['*']
+ }
+
+
 ALERT_REPORTS_NOTIFICATION_DRY_RUN = True
 WEBDRIVER_BASEURL = f"http://superset_app{os.environ.get('SUPERSET_APP_ROOT', '/')}/"  # When using docker compose baseurl should be http://superset_nginx{ENV{BASEPATH}}/  # noqa: E501
 # The base URL for the email report hyperlinks.
