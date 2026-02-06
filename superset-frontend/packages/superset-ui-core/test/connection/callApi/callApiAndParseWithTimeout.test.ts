@@ -27,19 +27,19 @@ import * as rejectAfterTimeout from '../../../src/connection/callApi/rejectAfter
 
 import { LOGIN_GLOB } from '../fixtures/constants';
 
+const mockGetUrl = '/mock/get/url';
+const mockGetPayload = { get: 'payload' };
+
+beforeAll(() => fetchMock.mockGlobal());
+afterAll(() => fetchMock.hardReset());
+
 describe('callApiAndParseWithTimeout()', () => {
-  beforeAll(() => {
-    fetchMock.get(LOGIN_GLOB, { result: '1234' });
-  });
+  beforeAll(() => fetchMock.get(LOGIN_GLOB, { result: '1234' }));
 
-  afterAll(fetchMock.restore);
-
-  const mockGetUrl = '/mock/get/url';
-  const mockGetPayload = { get: 'payload' };
-  fetchMock.get(mockGetUrl, mockGetPayload);
+  beforeEach(() => fetchMock.get(mockGetUrl, mockGetPayload));
 
   afterEach(() => {
-    fetchMock.reset();
+    fetchMock.removeRoutes().clearHistory();
     jest.useRealTimers();
   });
 
@@ -109,7 +109,7 @@ describe('callApiAndParseWithTimeout()', () => {
       } catch (err) {
         error = err;
       } finally {
-        expect(fetchMock.calls(mockTimeoutUrl)).toHaveLength(1);
+        expect(fetchMock.callHistory.calls(mockTimeoutUrl)).toHaveLength(1);
         expect(error).toEqual({
           error: 'Request timed out',
           statusText: 'timeout',

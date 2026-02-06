@@ -23,18 +23,22 @@ import {
   SupersetClient,
   buildQueryContext,
   QueryFormData,
-  configure as configureTranslation,
   ChartClient,
   getChartBuildQueryRegistry,
   getChartMetadataRegistry,
   ChartMetadata,
+  VizType,
 } from '@superset-ui/core';
+import { configure as configureTranslation } from '@apache-superset/core';
 
 import { LOGIN_GLOB } from '../fixtures/constants';
 import { sankeyFormData } from '../fixtures/formData';
 import { SliceIdAndOrFormData } from '../../../src/chart/clients/ChartClient';
 
 configureTranslation();
+
+beforeAll(() => fetchMock.mockGlobal());
+afterAll(() => fetchMock.hardReset());
 
 describe('ChartClient', () => {
   let chartClient: ChartClient;
@@ -49,7 +53,7 @@ describe('ChartClient', () => {
     chartClient = new ChartClient();
   });
 
-  afterEach(fetchMock.restore);
+  afterEach(() => fetchMock.removeRoutes().clearHistory());
 
   describe('new ChartClient(config)', () => {
     it('creates a client without argument', () => {
@@ -86,13 +90,13 @@ describe('ChartClient', () => {
           sliceId,
           formData: {
             granularity: 'second',
-            viz_type: 'bar',
+            viz_type: VizType.Bar,
           },
         }),
       ).resolves.toEqual({
         ...sankeyFormData,
         granularity: 'second',
-        viz_type: 'bar',
+        viz_type: VizType.Bar,
       });
     });
     it('returns promise of formData if only formData was given', () =>
@@ -101,13 +105,13 @@ describe('ChartClient', () => {
           formData: {
             datasource: '1__table',
             granularity: 'minute',
-            viz_type: 'line',
+            viz_type: VizType.Line,
           },
         }),
       ).resolves.toEqual({
         datasource: '1__table',
         granularity: 'minute',
-        viz_type: 'line',
+        viz_type: VizType.Line,
       }));
     it('rejects if none of sliceId or formData is specified', () =>
       expect(
@@ -120,12 +124,12 @@ describe('ChartClient', () => {
   describe('.loadQueryData(formData, options)', () => {
     it('returns a promise of query data for known chart type', () => {
       getChartMetadataRegistry().registerValue(
-        'word_cloud',
+        VizType.WordCloud,
         new ChartMetadata({ name: 'Word Cloud', thumbnail: '' }),
       );
 
       getChartBuildQueryRegistry().registerValue(
-        'word_cloud',
+        VizType.WordCloud,
         (formData: QueryFormData) => buildQueryContext(formData),
       );
       fetchMock.post('glob:*/api/v1/chart/data', [
@@ -138,7 +142,7 @@ describe('ChartClient', () => {
       return expect(
         chartClient.loadQueryData({
           granularity: 'minute',
-          viz_type: 'word_cloud',
+          viz_type: VizType.WordCloud,
           datasource: '1__table',
         }),
       ).resolves.toEqual([
@@ -255,7 +259,7 @@ describe('ChartClient', () => {
     it('loadAllDataNecessaryForAChart', () => {
       fetchMock.get(`glob:*/api/v1/form_data/?slice_id=${sliceId}`, {
         granularity: 'minute',
-        viz_type: 'line',
+        viz_type: VizType.Line,
         datasource: '1__table',
         color: 'living-coral',
       });
@@ -275,12 +279,12 @@ describe('ChartClient', () => {
       });
 
       getChartMetadataRegistry().registerValue(
-        'line',
+        VizType.Line,
         new ChartMetadata({ name: 'Line', thumbnail: '.gif' }),
       );
 
       getChartBuildQueryRegistry().registerValue(
-        'line',
+        VizType.Line,
         (formData: QueryFormData) => buildQueryContext(formData),
       );
 
@@ -296,7 +300,7 @@ describe('ChartClient', () => {
         },
         formData: {
           granularity: 'minute',
-          viz_type: 'line',
+          viz_type: VizType.Line,
           datasource: '1__table',
           color: 'living-coral',
         },

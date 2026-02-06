@@ -17,18 +17,22 @@
  * under the License.
  */
 import fetchMock from 'fetch-mock';
+import { VizType } from '@superset-ui/core';
 import { getFormData } from '../../../../src/query/api/legacy';
 
 import setupClientForTest from '../setupClientForTest';
 
-describe('getFormData()', () => {
-  beforeAll(setupClientForTest);
+beforeAll(() => fetchMock.mockGlobal());
+afterAll(() => fetchMock.hardReset());
 
-  afterEach(fetchMock.restore);
+describe('getFormData()', () => {
+  beforeAll(() => setupClientForTest());
+
+  afterEach(() => fetchMock.clearHistory().removeRoutes());
 
   const mockData = {
     datasource: '1__table',
-    viz_type: 'sankey',
+    viz_type: VizType.Sankey,
     slice_id: 1,
     url_params: {},
     granularity_sqla: null,

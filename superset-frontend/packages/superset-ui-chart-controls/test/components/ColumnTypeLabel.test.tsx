@@ -16,11 +16,10 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { isValidElement } from 'react';
+import { render, screen } from '@superset-ui/core/spec';
 import '@testing-library/jest-dom';
-import { GenericDataType } from '@superset-ui/core';
-
+import { GenericDataType } from '@apache-superset/core/api/core';
 import { ColumnTypeLabel, ColumnTypeLabelProps } from '../../src';
 
 describe('ColumnOption', () => {
@@ -35,9 +34,7 @@ describe('ColumnOption', () => {
   }
 
   it('is a valid element', () => {
-    expect(React.isValidElement(<ColumnTypeLabel {...defaultProps} />)).toBe(
-      true,
-    );
+    expect(isValidElement(<ColumnTypeLabel {...defaultProps} />)).toBe(true);
   });
   it('string type shows ABC icon', () => {
     renderColumnTypeLabel({ type: GenericDataType.String });
@@ -54,6 +51,10 @@ describe('ColumnOption', () => {
   it('expression type shows function icon', () => {
     renderColumnTypeLabel({ type: 'expression' });
     expect(screen.getByLabelText('function type icon')).toBeVisible();
+  });
+  it('metric type shows sigma icon', () => {
+    renderColumnTypeLabel({ type: 'metric' });
+    expect(screen.getByLabelText('metric type icon')).toBeVisible();
   });
   it('unknown type shows question mark', () => {
     renderColumnTypeLabel({ type: undefined });

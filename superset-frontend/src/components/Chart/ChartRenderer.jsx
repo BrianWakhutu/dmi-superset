@@ -18,18 +18,19 @@
  */
 import { snakeCase, isEqual, cloneDeep } from 'lodash';
 import PropTypes from 'prop-types';
-import React from 'react';
+import { createRef, Component } from 'react';
 import {
   SuperChart,
-  logging,
   Behavior,
-  t,
+  getChartMetadataRegistry,
+  VizType,
   isFeatureEnabled,
   FeatureFlag,
-  getChartMetadataRegistry,
 } from '@superset-ui/core';
+import { logging } from '@apache-superset/core';
+import { t } from '@apache-superset/core/ui';
 import { Logger, LOG_ACTIONS_RENDER_CHART } from 'src/logger/LogUtils';
-import { EmptyStateBig, EmptyStateSmall } from 'src/components/EmptyState';
+import { EmptyState } from '@superset-ui/core/components';
 import { ChartSource } from 'src/types/ChartSource';
 import ChartContextMenu from './ChartContextMenu/ChartContextMenu';
 
@@ -41,8 +42,8 @@ const propTypes = {
   initialValues: PropTypes.object,
   formData: PropTypes.object.isRequired,
   latestQueryFormData: PropTypes.object,
-  labelColors: PropTypes.object,
-  sharedLabelColors: PropTypes.object,
+  labelsColor: PropTypes.object,
+  labelsColorMap: PropTypes.object,
   height: PropTypes.number,
   width: PropTypes.number,
   setControlValue: PropTypes.func,
@@ -63,6 +64,7 @@ const propTypes = {
   postTransformProps: PropTypes.func,
   source: PropTypes.oneOf([ChartSource.Dashboard, ChartSource.Explore]),
   emitCrossFilters: PropTypes.bool,
+  onChartStateChange: PropTypes.func,
 };
 
 const BLANK = {};
@@ -81,20 +83,24 @@ const defaultProps = {
   triggerRender: false,
 };
 
-class ChartRenderer extends React.Component {
+class ChartRenderer extends Component {
   constructor(props) {
     super(props);
+    const suppressContextMenu = getChartMetadataRegistry().get(
+      props.formData.viz_type ?? props.vizType,
+    )?.suppressContextMenu;
     this.state = {
       showContextMenu:
         props.source === ChartSource.Dashboard &&
-        (isFeatureEnabled(FeatureFlag.DrillToDetail) ||
-          isFeatureEnabled(FeatureFlag.DashboardCrossFilters)),
+        !suppressContextMenu &&
+        isFeatureEnabled(FeatureFlag.DrillToDetail),
       inContextMenu: false,
       legendState: undefined,
+      legendIndex: 0,
     };
     this.hasQueryResponseChange = false;
 
-    this.contextMenuRef = React.createRef();
+    this.contextMenuRef = createRef();
 
     this.handleAddFilter = this.handleAddFilter.bind(this);
     this.handleRenderSuccess = this.handleRenderSuccess.bind(this);
@@ -105,6 +111,7 @@ class ChartRenderer extends React.Component {
     this.handleContextMenuClosed = this.handleContextMenuClosed.bind(this);
     this.handleLegendStateChanged = this.handleLegendStateChanged.bind(this);
     this.onContextMenuFallback = this.onContextMenuFallback.bind(this);
+    this.handleLegendScroll = this.handleLegendScroll.bind(this);
 
     this.hooks = {
       onAddFilter: this.handleAddFilter,
@@ -119,6 +126,8 @@ class ChartRenderer extends React.Component {
       setDataMask: dataMask => {
         this.props.actions?.updateDataMask(this.props.chartId, dataMask);
       },
+      onLegendScroll: this.handleLegendScroll,
+      onChartStateChange: this.props.onChartStateChange,
     };
 
     // TODO: queriesResponse comes from Redux store but it's being edited by
@@ -144,6 +153,23 @@ class ChartRenderer extends React.Component {
         this.mutableQueriesResponse = cloneDeep(nextProps.queriesResponse);
       }
 
+      // Check if any matrixify-related properties have changed
+      const hasMatrixifyChanges = () => {
+        const isMatrixifyEnabled =
+          nextProps.formData.matrixify_enable_vertical_layout === true ||
+          nextProps.formData.matrixify_enable_horizontal_layout === true;
+        if (!isMatrixifyEnabled) return false;
+
+        // Check all matrixify-related properties
+        const matrixifyKeys = Object.keys(nextProps.formData).filter(key =>
+          key.startsWith('matrixify_'),
+        );
+
+        return matrixifyKeys.some(
+          key => !isEqual(nextProps.formData[key], this.props.formData[key]),
+        );
+      };
+
       return (
         this.hasQueryResponseChange ||
         !isEqual(nextProps.datasource, this.props.datasource) ||
@@ -153,12 +179,16 @@ class ChartRenderer extends React.Component {
         nextProps.height !== this.props.height ||
         nextProps.width !== this.props.width ||
         nextProps.triggerRender ||
-        nextProps.labelColors !== this.props.labelColors ||
-        nextProps.sharedLabelColors !== this.props.sharedLabelColors ||
+        nextProps.labelsColor !== this.props.labelsColor ||
+        nextProps.labelsColorMap !== this.props.labelsColorMap ||
         nextProps.formData.color_scheme !== this.props.formData.color_scheme ||
         nextProps.formData.stack !== this.props.formData.stack ||
+        nextProps.formData.subcategories !==
+          this.props.formData.subcategories ||
         nextProps.cacheBusterProp !== this.props.cacheBusterProp ||
-        nextProps.emitCrossFilters !== this.props.emitCrossFilters
+        nextProps.emitCrossFilters !== this.props.emitCrossFilters ||
+        nextProps.postTransformProps !== this.props.postTransformProps ||
+        hasMatrixifyChanges()
       );
     }
     return false;
@@ -242,6 +272,10 @@ class ChartRenderer extends React.Component {
     }
   }
 
+  handleLegendScroll(legendIndex) {
+    this.setState({ legendIndex });
+  }
+
   render() {
     const { chartAlert, chartStatus, chartId, emitCrossFilters } = this.props;
 
@@ -276,7 +310,7 @@ class ChartRenderer extends React.Component {
     // to each one of them.
     const snakeCaseVizType = snakeCase(vizType);
     const chartClassName =
-      vizType === 'table'
+      vizType === VizType.Table
         ? `superset-chart-${snakeCaseVizType}`
         : snakeCaseVizType;
 
@@ -303,7 +337,8 @@ class ChartRenderer extends React.Component {
     const noResultImage = 'chart.svg';
     if (width > BIG_NO_RESULT_MIN_WIDTH && height > BIG_NO_RESULT_MIN_HEIGHT) {
       noResultsComponent = (
-        <EmptyStateBig
+        <EmptyState
+          size="large"
           title={noResultTitle}
           description={noResultDescription}
           image={noResultImage}
@@ -311,7 +346,7 @@ class ChartRenderer extends React.Component {
       );
     } else {
       noResultsComponent = (
-        <EmptyStateSmall title={noResultTitle} image={noResultImage} />
+        <EmptyState title={noResultTitle} image={noResultImage} size="small" />
       );
     }
 
@@ -322,6 +357,18 @@ class ChartRenderer extends React.Component {
       ?.behaviors.find(behavior => behavior === Behavior.DrillToDetail)
       ? { inContextMenu: this.state.inContextMenu }
       : {};
+    // By pass no result component when server pagination is enabled & the table has:
+    // - a backend search query, OR
+    // - non-empty AG Grid filter model
+    const hasSearchText = (ownState?.searchText?.length || 0) > 0;
+    const hasAgGridFilters =
+      ownState?.agGridFilterModel &&
+      Object.keys(ownState.agGridFilterModel).length > 0;
+
+    const bypassNoResult = !(
+      formData?.server_pagination &&
+      (hasSearchText || hasAgGridFilters)
+    );
 
     return (
       <>
@@ -362,6 +409,8 @@ class ChartRenderer extends React.Component {
             postTransformProps={postTransformProps}
             emitCrossFilters={emitCrossFilters}
             legendState={this.state.legendState}
+            enableNoResults={bypassNoResult}
+            legendIndex={this.state.legendIndex}
             {...drillToDetailProps}
           />
         </div>

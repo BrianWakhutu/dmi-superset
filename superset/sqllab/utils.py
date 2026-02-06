@@ -39,6 +39,7 @@ DATABASE_KEYS = [
     "id",
     "disable_data_preview",
     "disable_drill_to_detail",
+    "allow_multi_catalog",
 ]
 
 
@@ -88,6 +89,7 @@ def bootstrap_sqllab_data(user_id: int | None) -> dict[str, Any]:
             k: v for k, v in database.to_json().items() if k in DATABASE_KEYS
         }
         databases[database.id]["backend"] = database.backend
+        databases[database.id]["allow_multi_catalog"] = database.allow_multi_catalog
 
     # These are unnecessary if sqllab backend persistence is disabled
     if is_feature_enabled("SQLLAB_BACKEND_PERSISTENCE"):

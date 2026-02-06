@@ -16,8 +16,9 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { HandlerFunction, JsonValue, styled } from '@superset-ui/core';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { HandlerFunction, JsonValue } from '@superset-ui/core';
+import { styled } from '@apache-superset/core/ui';
 import {
   RadioButtonOption,
   sharedControlComponents,

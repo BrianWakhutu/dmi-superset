@@ -17,38 +17,38 @@
  * under the License.
  */
 /* eslint camelcase: 0 */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import PropTypes from 'prop-types';
 import { bindActionCreators } from 'redux';
 import { connect } from 'react-redux';
 import {
-  styled,
-  t,
-  css,
-  useTheme,
-  logging,
   useChangeEffect,
   useComponentDidMount,
   usePrevious,
+  isMatrixifyEnabled,
 } from '@superset-ui/core';
-import { debounce, pick } from 'lodash';
+import { t, styled, css, useTheme } from '@apache-superset/core/ui';
+import { logging } from '@apache-superset/core';
+import { debounce, isEqual, isObjectLike, omit, pick } from 'lodash';
 import { Resizable } from 're-resizable';
-import { usePluginContext } from 'src/components/DynamicPlugins';
+import { Tooltip } from '@superset-ui/core/components';
+import { usePluginContext } from 'src/components';
 import { Global } from '@emotion/react';
-import { Tooltip } from 'src/components/Tooltip';
-import Icons from 'src/components/Icons';
+import { Icons } from '@superset-ui/core/components/Icons';
 import {
   getItem,
   setItem,
   LocalStorageKeys,
 } from 'src/utils/localStorageHelpers';
 import { RESERVED_CHART_URL_PARAMS, URL_PARAMS } from 'src/constants';
+import { QUERY_MODE_REQUISITES } from 'src/explore/constants';
 import { areObjectsEqual } from 'src/reduxUtils';
 import * as logActions from 'src/logger/actions';
 import {
   LOG_ACTIONS_MOUNT_EXPLORER,
   LOG_ACTIONS_CHANGE_EXPLORE_CONTROLS,
 } from 'src/logger/LogUtils';
+import { ensureAppRoot } from 'src/utils/pathUtils';
 import { getUrlParam } from 'src/utils/urlUtils';
 import cx from 'classnames';
 import * as chartActions from 'src/components/Chart/chartAction';
@@ -75,6 +75,9 @@ const propTypes = {
   actions: PropTypes.object.isRequired,
   datasource_type: PropTypes.string.isRequired,
   dashboardId: PropTypes.number,
+  colorScheme: PropTypes.string,
+  ownColorScheme: PropTypes.string,
+  dashboardColorScheme: PropTypes.string,
   isDatasourceMetaLoading: PropTypes.bool.isRequired,
   chart: chartPropShape.isRequired,
   slice: PropTypes.object,
@@ -93,32 +96,31 @@ const propTypes = {
 
 const ExplorePanelContainer = styled.div`
   ${({ theme }) => css`
-    background: ${theme.colors.grayscale.light5};
     text-align: left;
     position: relative;
     width: 100%;
     max-height: 100%;
+    background-color: ${theme.colorBgContainer};
     min-height: 0;
     display: flex;
     flex: 1;
     flex-wrap: nowrap;
-    border-top: 1px solid ${theme.colors.grayscale.light2};
+    border-top: 1px solid ${theme.colorSplit};
     .explore-column {
       display: flex;
       flex-direction: column;
-      padding: ${theme.gridUnit * 2}px 0;
+      padding: ${theme.sizeUnit * 2}px 0;
       max-height: 100%;
     }
     .data-source-selection {
-      background-color: ${theme.colors.grayscale.light5};
-      padding: ${theme.gridUnit * 2}px 0;
-      border-right: 1px solid ${theme.colors.grayscale.light2};
+      padding: ${theme.sizeUnit * 2}px 0;
+      border-right: 1px solid ${theme.colorSplit};
     }
     .main-explore-content {
       flex: 1;
-      min-width: ${theme.gridUnit * 128}px;
-      border-left: 1px solid ${theme.colors.grayscale.light2};
-      padding: 0 ${theme.gridUnit * 4}px;
+      min-width: ${theme.sizeUnit * 128}px;
+      border-left: 1px solid ${theme.colorSplit};
+      padding: 0 ${theme.sizeUnit * 4}px;
       .panel {
         margin-bottom: 0;
       }
@@ -131,10 +133,14 @@ const ExplorePanelContainer = styled.div`
       position: relative;
       display: flex;
       flex-direction: row;
-      padding: 0 ${theme.gridUnit * 2}px 0 ${theme.gridUnit * 4}px;
+      padding: 0 ${theme.sizeUnit * 2}px 0 ${theme.sizeUnit * 4}px;
       justify-content: space-between;
       .horizontal-text {
-        font-size: ${theme.typography.sizes.m}px;
+        font-size: ${theme.fontSize}px;
+        line-height: 1.5;
+        display: inline-block;
+        height: auto;
+        overflow: visible;
       }
     }
     .no-show {
@@ -146,12 +152,11 @@ const ExplorePanelContainer = styled.div`
     }
     .sidebar {
       height: 100%;
-      background-color: ${theme.colors.grayscale.light4};
-      padding: ${theme.gridUnit * 2}px;
-      width: ${theme.gridUnit * 8}px;
+      padding: ${theme.sizeUnit * 2}px;
+      width: ${theme.sizeUnit * 8}px;
     }
     .collapse-icon > svg {
-      color: ${theme.colors.primary.base};
+      color: ${theme.colorPrimary};
     }
   `};
 `;
@@ -211,7 +216,7 @@ const updateHistory = debounce(
         stateModifier = 'pushState';
       }
       // avoid race condition in case user changes route before explore updates the url
-      if (window.location.pathname.startsWith('/explore')) {
+      if (window.location.pathname.startsWith(ensureAppRoot('/explore'))) {
         const url = mountExploreUrl(
           standalone ? URL_PARAMS.standalone.name : null,
           {
@@ -243,6 +248,28 @@ function setSidebarWidths(key, dimension) {
   setItem(key, newDimension);
 }
 
+// Chart types that use aggregation and can have multiple values in tooltips
+const AGGREGATED_CHART_TYPES = [
+  // Deck.gl aggregated charts
+  'deck_screengrid',
+  'deck_heatmap',
+  'deck_contour',
+  'deck_hex',
+  'deck_grid',
+  // Other aggregated chart types can be added here
+  'heatmap',
+  'treemap',
+  'sunburst',
+  'pie',
+  'donut',
+  'histogram',
+  'table',
+];
+
+function isAggregatedChartType(vizType) {
+  return AGGREGATED_CHART_TYPES.includes(vizType);
+}
+
 function ExploreViewContainer(props) {
   const dynamicPluginContext = usePluginContext();
   const dynamicPlugin = dynamicPluginContext.dynamicPlugins[props.vizType];
@@ -263,6 +290,28 @@ function ExploreViewContainer(props) {
   const tabId = useTabId();
 
   const theme = useTheme();
+
+  // Capture original title before any effects run
+  const originalTitle = useMemo(() => document.title, []);
+
+  // Update document title when slice name changes
+  useEffect(() => {
+    if (props.sliceName) {
+      document.title = props.sliceName;
+    }
+  }, [props.sliceName]);
+
+  // Restore original title on unmount
+  useEffect(
+    () => () => {
+      document.title =
+        originalTitle ||
+        theme?.brandAppName ||
+        theme?.brandLogoAlt ||
+        'Superset';
+    },
+    [originalTitle, theme?.brandAppName, theme?.brandLogoAlt],
+  );
 
   const addHistory = useCallback(
     async ({ isReplace = false, title } = {}) => {
@@ -311,10 +360,30 @@ function ExploreViewContainer(props) {
 
   const onQuery = useCallback(() => {
     props.actions.setForceQuery(false);
+
+    // Skip main query if Matrixify is enabled
+    if (isMatrixifyEnabled(props.form_data)) {
+      // Set chart to success state since Matrixify will handle its own queries
+      props.actions.chartUpdateSucceeded([], props.chart.id);
+      props.actions.chartRenderingSucceeded(props.chart.id);
+
+      // Update history and controls
+      addHistory();
+      setLastQueriedControls(props.controls);
+      return;
+    }
+
+    // Normal behavior for non-Matrixify
     props.actions.triggerQuery(true, props.chart.id);
     addHistory();
     setLastQueriedControls(props.controls);
-  }, [props.controls, addHistory, props.actions, props.chart.id]);
+  }, [
+    props.controls,
+    addHistory,
+    props.actions,
+    props.chart.id,
+    props.form_data,
+  ]);
 
   const handleKeydown = useCallback(
     event => {
@@ -355,7 +424,14 @@ function ExploreViewContainer(props) {
   }
 
   useComponentDidMount(() => {
-    props.actions.logEvent(LOG_ACTIONS_MOUNT_EXPLORER);
+    props.actions.logEvent(
+      LOG_ACTIONS_MOUNT_EXPLORER,
+      props.slice?.slice_id
+        ? {
+            slice_id: props.slice.slice_id,
+          }
+        : undefined,
+    );
   });
 
   useChangeEffect(tabId, (previous, current) => {
@@ -448,6 +524,76 @@ function ExploreViewContainer(props) {
           ),
       );
 
+      if (changedControlKeys.includes('tooltip_contents')) {
+        const tooltipContents = props.controls.tooltip_contents?.value || [];
+        const currentTemplate = props.controls.tooltip_template?.value || '';
+
+        if (tooltipContents.length > 0) {
+          const getFieldName = item => {
+            if (typeof item === 'string') return item;
+            if (item?.item_type === 'column') return item.column_name;
+            if (item?.item_type === 'metric') {
+              return item.metric_name || item.label;
+            }
+            return null;
+          };
+
+          const vizType = props.form_data?.viz_type || '';
+          const isAggregatedChart = isAggregatedChartType(vizType);
+
+          const DEFAULT_TOOLTIP_LIMIT = 10; // Maximum number of values to show in aggregated tooltips
+
+          const fieldNames = tooltipContents.map(getFieldName).filter(Boolean);
+          const missingVariables = fieldNames.filter(
+            fieldName =>
+              !currentTemplate.includes(`{{ ${fieldName} }}`) &&
+              !currentTemplate.includes(`{{ limit ${fieldName}`),
+          );
+
+          if (missingVariables.length > 0) {
+            const newVariables = missingVariables.map(fieldName => {
+              const item = tooltipContents[fieldNames.indexOf(fieldName)];
+              const isColumn =
+                item?.item_type === 'column' || typeof item === 'string';
+
+              if (isAggregatedChart && isColumn) {
+                return `{{ limit ${fieldName} ${DEFAULT_TOOLTIP_LIMIT} }}`;
+              }
+              return `{{ ${fieldName} }}`;
+            });
+            const updatedTemplate =
+              currentTemplate +
+              (currentTemplate ? ' ' : '') +
+              newVariables.join(' ');
+
+            props.actions.setControlValue('tooltip_template', updatedTemplate);
+          }
+        }
+      }
+
+      // Automatically set axis title margins when titles are added or removed
+      if (changedControlKeys.includes('x_axis_title')) {
+        const xAxisTitle = props.controls.x_axis_title?.value || '';
+        const currentMargin = props.controls.x_axis_title_margin?.value ?? 0;
+
+        if (xAxisTitle && currentMargin < 30) {
+          props.actions.setControlValue('x_axis_title_margin', 30);
+        } else if (!xAxisTitle && currentMargin !== 0) {
+          props.actions.setControlValue('x_axis_title_margin', 0);
+        }
+      }
+
+      if (changedControlKeys.includes('y_axis_title')) {
+        const yAxisTitle = props.controls.y_axis_title?.value || '';
+        const currentMargin = props.controls.y_axis_title_margin?.value ?? 0;
+
+        if (yAxisTitle && currentMargin < 30) {
+          props.actions.setControlValue('y_axis_title_margin', 30);
+        } else if (!yAxisTitle && currentMargin !== 0) {
+          props.actions.setControlValue('y_axis_title_margin', 0);
+        }
+      }
+
       // this should also be handled by the actions that are actually changing the controls
       const displayControlsChanged = changedControlKeys.filter(
         key => props.controls[key].renderTrigger,
@@ -460,15 +606,21 @@ function ExploreViewContainer(props) {
 
   const chartIsStale = useMemo(() => {
     if (lastQueriedControls) {
-      const changedControlKeys = Object.keys(props.controls).filter(
-        key =>
-          typeof lastQueriedControls[key] !== 'undefined' &&
-          !areObjectsEqual(
-            props.controls[key].value,
-            lastQueriedControls[key].value,
-            { ignoreFields: ['datasourceWarning'] },
-          ),
-      );
+      const { controls } = props;
+      const changedControlKeys = Object.keys(controls).filter(key => {
+        const lastControl = lastQueriedControls[key];
+        if (typeof lastControl === 'undefined') {
+          return false;
+        }
+        const { value: value1 } = controls[key];
+        const { value: value2 } = lastControl;
+        if (isObjectLike(value1) && isObjectLike(value2)) {
+          return !areObjectsEqual(value1, value2, {
+            ignoreFields: ['datasourceWarning'],
+          });
+        }
+        return !isEqual(value1, value2);
+      });
 
       return changedControlKeys.some(
         key =>
@@ -487,8 +639,11 @@ function ExploreViewContainer(props) {
     }
   });
 
+  const previousOwnState = usePrevious(props.ownState);
   useEffect(() => {
-    if (props.ownState !== undefined) {
+    const strip = s =>
+      s && typeof s === 'object' ? omit(s, ['clientView']) : s;
+    if (!isEqual(strip(previousOwnState), strip(props.ownState))) {
       onQuery();
       reRenderChart();
     }
@@ -499,6 +654,7 @@ function ExploreViewContainer(props) {
   }
 
   const errorMessage = useMemo(() => {
+    // Include all controls with validation errors (for button disabling)
     const controlsWithErrors = Object.values(props.controls).filter(
       control =>
         control.validationErrors && control.validationErrors.length > 0,
@@ -516,7 +672,11 @@ function ExploreViewContainer(props) {
       .map(message => {
         const matchingLabels = controlsWithErrors
           .filter(control => control.validationErrors?.includes(message))
-          .map(control => control.label);
+          .map(control =>
+            typeof control.label === 'function'
+              ? control.label(props.exploreState)
+              : control.label,
+          );
         return [matchingLabels, message];
       })
       .map(([labels, message]) => (
@@ -534,11 +694,62 @@ function ExploreViewContainer(props) {
     return errorMessage;
   }, [props.controls]);
 
+  // Error message for Data tab only (excludes matrixify controls)
+  const dataTabErrorMessage = useMemo(() => {
+    const controlsWithErrors = Object.values(props.controls).filter(
+      control =>
+        control.validationErrors &&
+        control.validationErrors.length > 0 &&
+        control.tabOverride !== 'matrixify', // Exclude matrixify controls from Data tab
+    );
+    if (controlsWithErrors.length === 0) {
+      return null;
+    }
+
+    const errorMessages = controlsWithErrors.map(
+      control => control.validationErrors,
+    );
+    const uniqueErrorMessages = [...new Set(errorMessages.flat())];
+
+    const errors = uniqueErrorMessages
+      .map(message => {
+        const matchingLabels = controlsWithErrors
+          .filter(control => control.validationErrors?.includes(message))
+          .map(control =>
+            typeof control.label === 'function'
+              ? control.label(props.exploreState)
+              : control.label,
+          );
+        return [matchingLabels, message];
+      })
+      .map(([labels, message]) => (
+        <div key={message}>
+          {labels.length > 1 ? t('Controls labeled ') : t('Control labeled ')}
+          <strong>{` ${labels.join(', ')}`}</strong>
+          <span>: {message}</span>
+        </div>
+      ));
+
+    let dataTabErrorMessage;
+    if (errors.length > 0) {
+      dataTabErrorMessage = (
+        <div
+          css={css`
+            text-align: 'left';
+          `}
+        >
+          {errors}
+        </div>
+      );
+    }
+    return dataTabErrorMessage;
+  }, [props.controls]);
+
   function renderChartContainer() {
     return (
       <ExploreChartPanel
         {...props}
-        errorMessage={errorMessage}
+        errorMessage={dataTabErrorMessage}
         chartIsStale={chartIsStale}
         onQuery={onQuery}
       />
@@ -556,6 +767,7 @@ function ExploreViewContainer(props) {
         canOverwrite={props.can_overwrite}
         canDownload={props.can_download}
         dashboardId={props.dashboardId}
+        colorScheme={props.dashboardColorScheme}
         isStarred={props.isStarred}
         slice={props.slice}
         sliceName={props.sliceName}
@@ -567,6 +779,7 @@ function ExploreViewContainer(props) {
         reports={props.reports}
         saveDisabled={errorMessage || props.chart.chartStatus === 'loading'}
         metadata={props.metadata}
+        isSaveModalVisible={props.isSaveModalVisible}
       />
       <ExplorePanelContainer id="explore-container">
         <Global
@@ -617,10 +830,13 @@ function ExploreViewContainer(props) {
               className="action-button"
               onClick={toggleCollapse}
             >
-              <Icons.Expand
+              <Icons.VerticalAlignTopOutlined
+                iconSize="xl"
+                css={css`
+                  transform: rotate(-90deg);
+                `}
                 className="collapse-icon"
-                iconColor={theme.colors.primary.base}
-                iconSize="l"
+                iconColor={theme.colorPrimary}
               />
             </span>
           </div>
@@ -643,10 +859,13 @@ function ExploreViewContainer(props) {
           >
             <span role="button" tabIndex={0} className="action-button">
               <Tooltip title={t('Open Datasource tab')}>
-                <Icons.Collapse
+                <Icons.VerticalAlignTopOutlined
+                  iconSize="xl"
+                  css={css`
+                    transform: rotate(90deg);
+                  `}
                   className="collapse-icon"
-                  iconColor={theme.colors.primary.base}
-                  iconSize="l"
+                  iconColor={theme.colorPrimary}
                 />
               </Tooltip>
             </span>
@@ -676,7 +895,8 @@ function ExploreViewContainer(props) {
             onQuery={onQuery}
             onStop={onStop}
             canStopQuery={props.can_add || props.can_overwrite}
-            errorMessage={errorMessage}
+            errorMessage={dataTabErrorMessage}
+            buttonErrorMessage={errorMessage}
             chartIsStale={chartIsStale}
           />
         </Resizable>
@@ -704,6 +924,22 @@ function ExploreViewContainer(props) {
 
 ExploreViewContainer.propTypes = propTypes;
 
+const retainQueryModeRequirements = hiddenFormData =>
+  Object.keys(hiddenFormData ?? {}).filter(
+    key => !QUERY_MODE_REQUISITES.has(key),
+  );
+
+function patchBigNumberTotalFormData(form_data, slice) {
+  if (
+    form_data.viz_type === 'big_number_total' &&
+    !form_data.subtitle &&
+    slice?.form_data?.subheader
+  ) {
+    return { ...form_data, subtitle: slice.form_data.subheader };
+  }
+  return form_data;
+}
+
 function mapStateToProps(state) {
   const {
     explore,
@@ -715,21 +951,74 @@ function mapStateToProps(state) {
     user,
     saveModal,
   } = state;
-  const { controls, slice, datasource, metadata } = explore;
-  const form_data = getFormDataFromControls(controls);
+  const { controls, slice, datasource, metadata, hiddenFormData } = explore;
+  const hasQueryMode = !!controls?.query_mode?.value;
+  const fieldsToOmit = hasQueryMode
+    ? retainQueryModeRequirements(hiddenFormData)
+    : Object.keys(hiddenFormData ?? {});
+
+  const controlsBasedFormData = omit(
+    getFormDataFromControls(controls),
+    fieldsToOmit,
+  );
+  const isDeckGLChart = explore.form_data?.viz_type === 'deck_multi';
+
+  const getDeckGLFormData = () => {
+    const formData = { ...controlsBasedFormData };
+
+    if (explore.form_data?.layer_filter_scope) {
+      formData.layer_filter_scope = explore.form_data.layer_filter_scope;
+    }
+
+    if (explore.form_data?.filter_data_mapping) {
+      formData.filter_data_mapping = explore.form_data.filter_data_mapping;
+    }
+
+    return formData;
+  };
+
+  const form_data = isDeckGLChart ? getDeckGLFormData() : controlsBasedFormData;
+
   const slice_id = form_data.slice_id ?? slice?.slice_id ?? 0; // 0 - unsaved chart
+
+  // exclude clientView from extra_form_data; keep other ownState pieces
+  const ownStateForQuery = omit(dataMask[slice_id]?.ownState, ['clientView']);
+
   form_data.extra_form_data = mergeExtraFormData(
     { ...form_data.extra_form_data },
     {
-      ...dataMask[slice_id]?.ownState,
+      ...ownStateForQuery,
     },
   );
   const chart = charts[slice_id];
+  const colorScheme = explore.form_data?.color_scheme;
+  const ownColorScheme = explore.form_data?.own_color_scheme;
+  const dashboardColorScheme = explore.form_data?.dashboard_color_scheme;
 
   let dashboardId = Number(explore.form_data?.dashboardId);
   if (Number.isNaN(dashboardId)) {
     dashboardId = undefined;
   }
+
+  if (
+    controls &&
+    form_data.viz_type === 'big_number_total' &&
+    slice?.form_data?.subheader &&
+    (!controls.subtitle?.value || controls.subtitle.value === '')
+  ) {
+    controls.subtitle = {
+      ...controls.subtitle,
+      value: slice.form_data.subheader,
+    };
+    if (slice?.form_data?.subheader_font_size) {
+      controls.subtitle_font_size = {
+        ...controls.subtitle_font_size,
+        value: slice.form_data.subheader_font_size,
+      };
+    }
+  }
+
+  const patchedFormData = patchBigNumberTotalFormData(form_data, slice);
 
   return {
     isDatasourceMetaLoading: explore.isDatasourceMetaLoading,
@@ -737,6 +1026,9 @@ function mapStateToProps(state) {
     datasource_type: datasource.type,
     datasourceId: datasource.datasource_id,
     dashboardId,
+    colorScheme,
+    ownColorScheme,
+    dashboardColorScheme,
     controls: explore.controls,
     can_add: !!explore.can_add,
     can_download: !!explore.can_download,
@@ -749,7 +1041,7 @@ function mapStateToProps(state) {
     slice,
     sliceName: explore.sliceName ?? slice?.slice_name ?? null,
     triggerRender: explore.triggerRender,
-    form_data,
+    form_data: patchedFormData,
     table_name: datasource.table_name,
     vizType: form_data.viz_type,
     standalone: !!explore.standalone,
@@ -783,4 +1075,4 @@ function mapDispatchToProps(dispatch) {
 export default connect(
   mapStateToProps,
   mapDispatchToProps,
-)(withToasts(React.memo(ExploreViewContainer)));
+)(withToasts(memo(ExploreViewContainer)));

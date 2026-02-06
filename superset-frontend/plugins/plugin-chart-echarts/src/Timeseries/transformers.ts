@@ -25,15 +25,13 @@ import {
   FilterState,
   FormulaAnnotationLayer,
   IntervalAnnotationLayer,
-  isTimeseriesAnnotationResult,
   LegendState,
-  SupersetTheme,
   TimeseriesAnnotationLayer,
   TimeseriesDataRecord,
   ValueFormatter,
 } from '@superset-ui/core';
-import { SeriesOption } from 'echarts';
-import {
+import { SupersetTheme, isThemeDark } from '@apache-superset/core/ui';
+import type {
   CallbackDataParams,
   DefaultStatesMixin,
   ItemStyleOption,
@@ -43,16 +41,18 @@ import {
   SeriesLineLabelOption,
   ZRLineType,
 } from 'echarts/types/src/util/types';
-import {
+import type { SeriesOption } from 'echarts';
+import type {
   MarkArea1DDataItemOption,
   MarkArea2DDataItemOption,
 } from 'echarts/types/src/component/marker/MarkAreaModel';
-import { MarkLine1DDataItemOption } from 'echarts/types/src/component/marker/MarkLineModel';
+import type { MarkLine1DDataItemOption } from 'echarts/types/src/component/marker/MarkLineModel';
 import { extractForecastSeriesContext } from '../utils/forecast';
 import {
   EchartsTimeseriesSeriesType,
   ForecastSeriesEnum,
   LegendOrientation,
+  OrientationType,
   StackType,
 } from '../types';
 
@@ -137,12 +137,40 @@ export const getBaselineSeriesForStream = (
   };
 };
 
+export function transformNegativeLabelsPosition(
+  series: SeriesOption,
+  isHorizontal: boolean,
+): TimeseriesDataRecord[] {
+  /*
+   * Adjusts label position for negative values in bar series
+   * @param series - Array of series options
+   * @param isHorizontal - Whether chart is horizontal
+   * @returns data with adjusted label positions for negative values
+   */
+  const transformValue = (value: any) => {
+    const [xValue, yValue] = Array.isArray(value) ? value : [null, null];
+    const axisValue = isHorizontal ? xValue : yValue;
+
+    return axisValue < 0
+      ? {
+          value,
+          label: {
+            position: 'outside',
+          },
+        }
+      : value;
+  };
+
+  return (series.data as TimeseriesDataRecord[]).map(transformValue);
+}
+
 export function transformSeries(
   series: SeriesOption,
   colorScale: CategoricalColorScale,
   colorScaleKey: string,
   opts: {
     area?: boolean;
+    connectNulls?: boolean;
     filterState?: FilterState;
     seriesContexts?: { [key: string]: ForecastSeriesEnum[] };
     markerEnabled?: boolean;
@@ -150,6 +178,7 @@ export function transformSeries(
     areaOpacity?: number;
     seriesType?: EchartsTimeseriesSeriesType;
     stack?: StackType;
+    stackIdSuffix?: string;
     yAxisIndex?: number;
     showValue?: boolean;
     onlyTotal?: boolean;
@@ -165,11 +194,15 @@ export function transformSeries(
     lineStyle?: LineStyleOption;
     queryIndex?: number;
     timeCompare?: string[];
+    timeShiftColor?: boolean;
+    theme?: SupersetTheme;
+    hasDimensions?: boolean;
   },
 ): SeriesOption | undefined {
-  const { name } = series;
+  const { name, data } = series;
   const {
     area,
+    connectNulls,
     filterState,
     seriesContexts = {},
     markerEnabled,
@@ -177,6 +210,7 @@ export function transformSeries(
     areaOpacity = 1,
     seriesType,
     stack,
+    stackIdSuffix,
     yAxisIndex = 0,
     showValue,
     onlyTotal,
@@ -186,10 +220,13 @@ export function transformSeries(
     showValueIndexes = [],
     thresholdValues = [],
     richTooltip,
+    seriesKey,
     sliceId,
     isHorizontal = false,
     queryIndex = 0,
     timeCompare = [],
+    timeShiftColor,
+    theme,
   } = opts;
   const contexts = seriesContexts[name || ''] || [];
   const hasForecast =
@@ -201,11 +238,15 @@ export function transformSeries(
   const isConfidenceBand =
     forecastSeries.type === ForecastSeriesEnum.ForecastLower ||
     forecastSeries.type === ForecastSeriesEnum.ForecastUpper;
+  // When cross-filtering by X-axis (no dimensions), selectedValues contains
+  // X-axis values rather than series names, so skip series-level dimming.
   const isFiltered =
-    filterState?.selectedValues && !filterState?.selectedValues.includes(name);
+    opts.hasDimensions !== false &&
+    filterState?.selectedValues &&
+    !filterState?.selectedValues.includes(name);
   const opacity = isFiltered
     ? OpacityEnum.SemiTransparent
-    : OpacityEnum.NonTransparent;
+    : opts.lineStyle?.opacity || OpacityEnum.NonTransparent;
 
   // don't create a series if doing a stack or area chart and the result
   // is a confidence band
@@ -218,10 +259,13 @@ export function transformSeries(
     stackId = forecastSeries.name;
   } else if (stack && isObservation) {
     // the suffix of the observation series is '' (falsy), which disables
-    // stacking. Therefore we need to set something that is truthy.
+    // stacking. Therefore, we need to set something that is truthy.
     stackId = getTimeCompareStackId('obs', timeCompare, name);
   } else if (stack && isTrend) {
     stackId = getTimeCompareStackId(forecastSeries.type, timeCompare, name);
+  }
+  if (stackId && stackIdSuffix) {
+    stackId += stackIdSuffix;
   }
   let plotType;
   if (
@@ -234,11 +278,25 @@ export function transformSeries(
   } else {
     plotType = seriesType === 'bar' ? 'bar' : 'line';
   }
-  // forcing the colorScale to return a different color for same metrics across different queries
-  const itemStyle = {
-    color: colorScale(colorScaleKey, sliceId),
+
+  const isDarkMode = theme ? isThemeDark(theme) : false;
+
+  /**
+   * if timeShiftColor is enabled the colorScaleKey forces the color to be the
+   * same as the original series, otherwise uses separate colors
+   * */
+  const itemStyle: ItemStyleOption = {
+    color: timeShiftColor
+      ? colorScale(colorScaleKey, sliceId)
+      : colorScale(seriesKey || forecastSeries.name, sliceId),
     opacity,
+    borderWidth: 0,
   };
+  if (seriesType === 'bar' && connectNulls) {
+    itemStyle.borderWidth = 1.5;
+    itemStyle.borderType = 'dotted';
+    itemStyle.borderColor = itemStyle.color;
+  }
   let emphasis = {};
   let showSymbol = false;
   if (!isConfidenceBand) {
@@ -266,8 +324,18 @@ export function transformSeries(
     isConfidenceBand || (stack === StackControlsValue.Stream && area)
       ? { ...opts.lineStyle, opacity: OpacityEnum.Transparent }
       : { ...opts.lineStyle, opacity };
+
+  // Use filled circles in dark mode to avoid the white fill issue with hollow circles
+  // Use emptyCircle explicitly in light mode
+  const symbol =
+    plotType === 'line' ? (isDarkMode ? 'circle' : 'emptyCircle') : undefined;
+
   return {
     ...series,
+    ...(Array.isArray(data) && seriesType === 'bar' && !stack
+      ? { data: transformNegativeLabelsPosition(series, isHorizontal) }
+      : null),
+    connectNulls,
     queryIndex,
     yAxisIndex,
     name: forecastSeries.name,
@@ -292,21 +360,25 @@ export function transformSeries(
             opacity: opacity * areaOpacity,
           }
         : undefined,
-    emphasis: {
-      // bold on hover as required since 5.3.0 to retain backwards feature parity:
-      // https://apache.github.io/echarts-handbook/en/basics/release-note/5-3-0/#removing-the-default-bolding-emphasis-effect-in-the-line-chart
-      // TODO: should consider only adding emphasis to currently hovered series
-      lineStyle: {
-        width: 'bolder',
-      },
-      ...emphasis,
-    },
+    emphasis,
     showSymbol,
+    symbol,
     symbolSize: markerSize,
     label: {
       show: !!showValue,
       position: isHorizontal ? 'right' : 'top',
+      color: theme?.colorText,
+      textBorderWidth: 0,
       formatter: (params: any) => {
+        // don't show confidence band value labels, as they're already visible on the tooltip
+        if (
+          [
+            ForecastSeriesEnum.ForecastUpper,
+            ForecastSeriesEnum.ForecastLower,
+          ].includes(forecastSeries.type)
+        ) {
+          return '';
+        }
         const { value, dataIndex, seriesIndex, seriesName } = params;
         const numericValue = isHorizontal ? value[0] : value[1];
         const isSelectedLegend = !legendState || legendState[seriesName];
@@ -342,8 +414,11 @@ export function transformFormulaAnnotation(
   xAxisType: AxisType,
   colorScale: CategoricalColorScale,
   sliceId?: number,
+  orientation?: OrientationType,
 ): SeriesOption {
   const { name, color, opacity, width, style } = layer;
+  const isHorizontal = orientation === OrientationType.Horizontal;
+
   return {
     name,
     id: name,
@@ -357,7 +432,9 @@ export function transformFormulaAnnotation(
     },
     type: 'line',
     smooth: true,
-    data: evalFormula(layer, data, xAxisCol, xAxisType),
+    data: evalFormula(layer, data, xAxisCol, xAxisType).map(([x, y]) =>
+      isHorizontal ? [y, x] : [x, y],
+    ),
     symbolSize: 0,
   };
 }
@@ -369,6 +446,7 @@ export function transformIntervalAnnotation(
   colorScale: CategoricalColorScale,
   theme: SupersetTheme,
   sliceId?: number,
+  orientation?: OrientationType,
 ): SeriesOption[] {
   const series: SeriesOption[] = [];
   const annotations = extractRecordAnnotations(layer, annotationData);
@@ -376,6 +454,7 @@ export function transformIntervalAnnotation(
     const { name, color, opacity, showLabel } = layer;
     const { descriptions, intervalEnd, time, title } = annotation;
     const label = formatAnnotationLabel(name, title, descriptions);
+    const isHorizontal = orientation === OrientationType.Horizontal;
     const intervalData: (
       | MarkArea1DDataItemOption
       | MarkArea2DDataItemOption
@@ -383,17 +462,15 @@ export function transformIntervalAnnotation(
       [
         {
           name: label,
-          xAxis: time,
+          ...(isHorizontal ? { yAxis: time } : { xAxis: time }),
         },
-        {
-          xAxis: intervalEnd,
-        },
+        isHorizontal ? { yAxis: intervalEnd } : { xAxis: intervalEnd },
       ],
     ];
     const intervalLabel: SeriesLabelOption = showLabel
       ? {
           show: true,
-          color: theme.colors.grayscale.dark2,
+          color: theme.colorTextLabel,
           position: 'insideTop',
           verticalAlign: 'top',
           fontWeight: 'bold',
@@ -401,19 +478,19 @@ export function transformIntervalAnnotation(
           emphasis: {
             position: 'insideTop',
             verticalAlign: 'top',
-            backgroundColor: theme.colors.grayscale.light5,
+            backgroundColor: theme.colorPrimaryBgHover,
           },
         }
       : {
           show: false,
-          color: theme.colors.grayscale.dark2,
+          color: theme.colorTextLabel,
           // @ts-ignore
           emphasis: {
             fontWeight: 'bold',
             show: true,
             position: 'insideTop',
             verticalAlign: 'top',
-            backgroundColor: theme.colors.grayscale.light5,
+            backgroundColor: theme.colorPrimaryBgHover,
           },
         };
     series.push({
@@ -444,6 +521,7 @@ export function transformEventAnnotation(
   colorScale: CategoricalColorScale,
   theme: SupersetTheme,
   sliceId?: number,
+  orientation?: OrientationType,
 ): SeriesOption[] {
   const series: SeriesOption[] = [];
   const annotations = extractRecordAnnotations(layer, annotationData);
@@ -451,10 +529,11 @@ export function transformEventAnnotation(
     const { name, color, opacity, style, width, showLabel } = layer;
     const { descriptions, time, title } = annotation;
     const label = formatAnnotationLabel(name, title, descriptions);
+    const isHorizontal = orientation === OrientationType.Horizontal;
     const eventData: MarkLine1DDataItemOption[] = [
       {
         name: label,
-        xAxis: time,
+        ...(isHorizontal ? { yAxis: time } : { xAxis: time }),
       },
     ];
 
@@ -472,25 +551,25 @@ export function transformEventAnnotation(
     const eventLabel: SeriesLineLabelOption = showLabel
       ? {
           show: true,
-          color: theme.colors.grayscale.dark2,
+          color: theme.colorTextLabel,
           position: 'insideEndTop',
           fontWeight: 'bold',
           formatter: (params: CallbackDataParams) => params.name,
           // @ts-ignore
           emphasis: {
-            backgroundColor: theme.colors.grayscale.light5,
+            backgroundColor: theme.colorPrimaryBgHover,
           },
         }
       : {
           show: false,
-          color: theme.colors.grayscale.dark2,
+          color: theme.colorTextLabel,
           position: 'insideEndTop',
           // @ts-ignore
           emphasis: {
             formatter: (params: CallbackDataParams) => params.name,
             fontWeight: 'bold',
             show: true,
-            backgroundColor: theme.colors.grayscale.light5,
+            backgroundColor: theme.colorPrimaryBgHover,
           },
         };
 
@@ -517,26 +596,36 @@ export function transformTimeseriesAnnotation(
   annotationData: AnnotationData,
   colorScale: CategoricalColorScale,
   sliceId?: number,
+  orientation?: OrientationType,
 ): SeriesOption[] {
   const series: SeriesOption[] = [];
   const { hideLine, name, opacity, showMarkers, style, width, color } = layer;
   const result = annotationData[name];
-  if (isTimeseriesAnnotationResult(result)) {
-    result.forEach(annotation => {
-      const { key, values } = annotation;
-      series.push({
-        type: 'line',
-        id: key,
-        name: key,
-        data: values.map(row => [row.x, row.y] as [OptionName, number]),
-        symbolSize: showMarkers ? markerSize : 0,
-        lineStyle: {
-          opacity: parseAnnotationOpacity(opacity),
-          type: style as ZRLineType,
-          width: hideLine ? 0 : width,
-          color: color || colorScale(name, sliceId),
-        },
-      });
+  const isHorizontal = orientation === OrientationType.Horizontal;
+  const { records } = result;
+  if (records) {
+    const data = records.map(record => {
+      const keys = Object.keys(record);
+      const x = keys.length > 0 ? record[keys[0]] : 0;
+      const y = keys.length > 1 ? record[keys[1]] : 0;
+      return isHorizontal
+        ? ([y, x] as [number, OptionName])
+        : ([x, y] as [OptionName, number]);
+    });
+    const computedStyle = {
+      opacity: parseAnnotationOpacity(opacity),
+      type: style as ZRLineType,
+      width: hideLine ? 0 : width,
+      color: color || colorScale(name, sliceId),
+    };
+    series.push({
+      type: 'line',
+      id: name,
+      name,
+      data,
+      symbolSize: showMarkers ? markerSize : 0,
+      itemStyle: computedStyle,
+      lineStyle: computedStyle,
     });
   }
   return series;
@@ -563,10 +652,6 @@ export function getPadding(
     ? TIMESERIES_CONSTANTS.yAxisLabelTopOffset
     : 0;
   const xAxisOffset = addXAxisTitleOffset ? Number(xAxisTitleMargin) || 0 : 0;
-  const showLegendTopOffset =
-    isHorizontal && showLegend && legendOrientation === LegendOrientation.Top
-      ? 100
-      : 0;
 
   return getChartPadding(
     showLegend,
@@ -575,12 +660,10 @@ export function getPadding(
     {
       top:
         yAxisTitlePosition && yAxisTitlePosition === 'Top'
-          ? TIMESERIES_CONSTANTS.gridOffsetTop +
-            showLegendTopOffset +
-            (Number(yAxisTitleMargin) || 0)
-          : TIMESERIES_CONSTANTS.gridOffsetTop +
-            showLegendTopOffset +
-            yAxisOffset,
+          ? TIMESERIES_CONSTANTS.gridOffsetTop + (Number(yAxisTitleMargin) || 0)
+          : yAxisTitlePosition === 'Left'
+            ? TIMESERIES_CONSTANTS.gridOffsetTop
+            : TIMESERIES_CONSTANTS.gridOffsetTop + yAxisOffset,
       bottom:
         zoomable && !isHorizontal
           ? TIMESERIES_CONSTANTS.gridOffsetBottomZoomable + xAxisOffset
