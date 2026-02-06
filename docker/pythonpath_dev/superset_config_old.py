@@ -24,6 +24,7 @@ import logging
 import os
 import sys
 
+
 from celery.schedules import crontab
 from flask_caching.backends.filesystemcache import FileSystemCache
 
@@ -42,18 +43,36 @@ EXAMPLES_HOST = os.getenv("EXAMPLES_HOST")
 EXAMPLES_PORT = os.getenv("EXAMPLES_PORT")
 EXAMPLES_DB = os.getenv("EXAMPLES_DB")
 
-# The SQLAlchemy connection string.
-SQLALCHEMY_DATABASE_URI = (
-    f"{DATABASE_DIALECT}://"
-    f"{DATABASE_USER}:{DATABASE_PASSWORD}@"
-    f"{DATABASE_HOST}:{DATABASE_PORT}/{DATABASE_DB}"
+ROW_LIMIT = 5000
+SUPERSET_WEBSERVER_PORT = 8088
+# Your App secret key
+SECRET_KEY = '\2\mthisismyscretkey\1\2\a\b\y\h'
+# SQLALCHEMY_DATABASE_URI = 'postgresql://superset:superset@host.docker.internal:1155/superset'
+
+# Flask-WTF flag for CSRF
+CSRF_ENABLED = True
+# Set this API key to enable Mapbox visualizations
+MAPBOX_API_KEY = ''
+
+CACHE_DEFAULT_TIMEOUT = 600
+
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/1'
+TALISMAN_ENABLED = False
+
+WTF_CSRF_ENABLED = False
+
+# Use environment variable if set, otherwise construct from components
+# This MUST take precedence over any other configuration
+SQLALCHEMY_EXAMPLES_URI = os.getenv(
+    "SUPERSET__SQLALCHEMY_EXAMPLES_URI",
+    (
+        f"{DATABASE_DIALECT}://"
+        f"{EXAMPLES_USER}:{EXAMPLES_PASSWORD}@"
+        f"{EXAMPLES_HOST}:{EXAMPLES_PORT}/{EXAMPLES_DB}"
+    ),
 )
 
-SQLALCHEMY_EXAMPLES_URI = (
-    f"{DATABASE_DIALECT}://"
-    f"{EXAMPLES_USER}:{EXAMPLES_PASSWORD}@"
-    f"{EXAMPLES_HOST}:{EXAMPLES_PORT}/{EXAMPLES_DB}"
-)
 
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = os.getenv("REDIS_PORT", "6379")
@@ -99,27 +118,21 @@ class CeleryConfig:
 
 CELERY_CONFIG = CeleryConfig
 
-
 TALISMAN_ENABLED = False
 WTF_CSRF_ENABLED = False
 FEATURE_FLAGS = {
- "ALERT_REPORTS": True,
- "ENABLE_TEMPLATE_PROCESSING": True,
- "ENABLE_REACT_CRUD_VIEWS": True,
- "EMBEDDED_SUPERSET": True ,
- "ALLOW_ADHOC_SUBQUERY" : True, #Allow custom sql metrics
- "ENABLE_JAVASCRIPT_CONTROLS":True,
- "THEME_ALLOW_THEME_EDITOR_BETA": False
+    "ALERT_REPORTS": True, 
+    "DATASET_FOLDERS": True,
+    "ENABLE_TEMPLATE_PROCESSING": True,
+    "ENABLE_REACT_CRUD_VIEWS": True,
+    "EMBEDDED_SUPERSET": True ,
+    "ALLOW_ADHOC_SUBQUERY" : True, #Allow custom sql metrics
+    "ENABLE_JAVASCRIPT_CONTROLS": True,
+    "THEME_ALLOW_THEME_EDITOR_BETA": False               
 }
-
 THEME = {
-#   "token": {
-#     "borderRadius": 4
-#   },
-#   "algorithm": "light"
-
 "token": {
-    "borderRadius": 2,
+    "borderRadius": 4,
     "brandLogoAlt": "Apache Superset",
     "brandLogoUrl": "/static/assets/images/superset-logo-horiz.png",
     "brandLogoMargin": "18px",
@@ -139,7 +152,7 @@ THEME = {
     "fontSizeXXL": "32",
     "fontWeightNormal": "400",
     "fontWeightLight": "300",
-    "fontWeightStrong": 500,
+    "fontWeightStrong": 600,
     "colorBgElevated": "#fafafa"
   },
   "algorithm": "default"
@@ -186,10 +199,10 @@ if os.getenv("CYPRESS_CONFIG") == "true":
 #
 try:
     import superset_config_docker
-    from superset_config_docker import *  # noqa
+    from superset_config_docker import *  # noqa: F403
 
     logger.info(
-        f"Loaded your Docker configuration at [{superset_config_docker.__file__}]"
+        "Loaded your Docker configuration at [%s]", superset_config_docker.__file__
     )
 except ImportError:
     logger.info("Using default Docker config...")
