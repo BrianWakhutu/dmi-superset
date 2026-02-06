@@ -17,7 +17,6 @@
  * under the License.
  */
 
-import React from 'react';
 import {
   ChartPlugin,
   ChartMetadata,
@@ -31,8 +30,9 @@ import {
   getChartControlPanelRegistry,
   QueryFormData,
   DatasourceType,
-  supersetTheme,
+  VizType,
 } from '@superset-ui/core';
+import { supersetTheme } from '@apache-superset/core/ui';
 
 describe('ChartPlugin', () => {
   const FakeChart = () => <span>test</span>;
@@ -60,7 +60,7 @@ describe('ChartPlugin', () => {
     const FORM_DATA = {
       datasource: '1__table',
       granularity: 'day',
-      viz_type: 'table',
+      viz_type: VizType.Table,
     };
 
     it('creates a new plugin', () => {

@@ -21,14 +21,15 @@ import fetchMock from 'fetch-mock';
 import { SupersetClient, SupersetClientClass } from '@superset-ui/core';
 import { LOGIN_GLOB } from './fixtures/constants';
 
+beforeAll(() => fetchMock.mockGlobal());
+afterAll(() => fetchMock.hardReset());
+
 describe('SupersetClient', () => {
-  beforeAll(() => {
-    fetchMock.get(LOGIN_GLOB, { result: '' });
-  });
+  beforeAll(() => fetchMock.get(LOGIN_GLOB, { result: '1234' }));
 
-  afterAll(fetchMock.restore);
+  afterAll(() => fetchMock.removeRoutes().clearHistory());
 
-  afterEach(SupersetClient.reset);
+  afterEach(() => SupersetClient.reset());
 
   it('exposes reset, configure, init, get, post, postForm, isAuthenticated, and reAuthenticate methods', () => {
     expect(typeof SupersetClient.configure).toBe('function');
@@ -81,7 +82,7 @@ describe('SupersetClient', () => {
       SupersetClientClass.prototype,
       'isAuthenticated',
     );
-    const csrfSpy = jest.spyOn(SupersetClientClass.prototype, 'getCSRFToken');
+    const csrfSpy = jest.spyOn(SupersetClientClass.prototype, 'fetchCSRFToken');
     const requestSpy = jest.spyOn(SupersetClientClass.prototype, 'request');
     const getGuestTokenSpy = jest.spyOn(
       SupersetClientClass.prototype,
@@ -110,9 +111,11 @@ describe('SupersetClient', () => {
       mockDeleteUrl,
     ];
     networkCalls.map((url: string) =>
-      expect(fetchMock.calls(url)[0][1]?.headers).toStrictEqual({
-        Accept: 'application/json',
-        'X-CSRFToken': '',
+      expect(
+        fetchMock.callHistory.calls(url)[0].options?.headers,
+      ).toStrictEqual({
+        accept: 'application/json',
+        'x-csrftoken': '1234',
       }),
     );
 
@@ -139,6 +142,6 @@ describe('SupersetClient', () => {
     authenticatedSpy.mockRestore();
     csrfSpy.mockRestore();
 
-    fetchMock.reset();
+    fetchMock.clearHistory().removeRoutes();
   });
 });

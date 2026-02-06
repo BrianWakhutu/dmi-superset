@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-/* eslint-disable no-unused-expressions */
 import { defaultState } from 'src/explore/store';
 import exploreReducer from 'src/explore/reducers/exploreReducer';
 import * as actions from 'src/explore/actions/exploreActions';
@@ -78,15 +77,16 @@ const METRICS = [
   },
 ];
 
+// eslint-disable-next-line no-restricted-globals -- TODO: Migrate from describe blocks
 describe('reducers', () => {
-  it('Does not set a control value if control does not exist', () => {
+  test('Does not set a control value if control does not exist', () => {
     const newState = exploreReducer(
       defaultState,
       actions.setControlValue('NEW_FIELD', 'x', []),
     );
     expect(newState.controls.NEW_FIELD).toBeUndefined();
   });
-  it('setControlValue works as expected with a Select control', () => {
+  test('setControlValue works as expected with a Select control', () => {
     const newState = exploreReducer(
       defaultState,
       actions.setControlValue('y_axis_format', '$,.2f', []),
@@ -94,7 +94,7 @@ describe('reducers', () => {
     expect(newState.controls.y_axis_format.value).toBe('$,.2f');
     expect(newState.form_data.y_axis_format).toBe('$,.2f');
   });
-  it('Keeps the column config when metric column positions are swapped', () => {
+  test('Keeps the column config when metric column positions are swapped', () => {
     const mockedState = {
       ...defaultState,
       controls: {
@@ -154,7 +154,7 @@ describe('reducers', () => {
     );
   });
 
-  it('Keeps the column config when metric column name is updated', () => {
+  test('Keeps the column config when metric column name is updated', () => {
     const mockedState = {
       ...defaultState,
       controls: {
@@ -215,6 +215,25 @@ describe('reducers', () => {
     expect(newState.form_data.metrics).toStrictEqual(updatedMetrics);
     expect(newState.form_data.column_config).toStrictEqual(
       expectedColumnConfig,
+    );
+  });
+
+  test('setStashFormData works as expected with fieldNames', () => {
+    const newState = exploreReducer(
+      defaultState,
+      actions.setStashFormData(true, ['y_axis_format']),
+    );
+    expect(newState.hiddenFormData).toEqual({
+      y_axis_format: defaultState.form_data.y_axis_format,
+    });
+    expect(newState.form_data.y_axis_format).toBeFalsy();
+    const updatedState = exploreReducer(
+      newState,
+      actions.setStashFormData(false, ['y_axis_format']),
+    );
+    expect(updatedState.hiddenFormData.y_axis_format).toBeFalsy();
+    expect(updatedState.form_data.y_axis_format).toEqual(
+      defaultState.form_data.y_axis_format,
     );
   });
 });

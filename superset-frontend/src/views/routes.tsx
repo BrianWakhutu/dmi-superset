@@ -17,7 +17,14 @@
  * under the License.
  */
 import { FeatureFlag, isFeatureEnabled } from '@superset-ui/core';
-import React, { lazy } from 'react';
+import {
+  lazy,
+  ComponentType,
+  ComponentProps,
+  LazyExoticComponent,
+} from 'react';
+import { isUserAdmin } from 'src/dashboard/util/permissionUtils';
+import getBootstrapData from 'src/utils/getBootstrapData';
 
 // not lazy loaded since this is the home page.
 import Home from 'src/pages/Home';
@@ -55,6 +62,10 @@ const CssTemplateList = lazy(
     import(
       /* webpackChunkName: "CssTemplateList" */ 'src/pages/CssTemplateList'
     ),
+);
+
+const ThemeList = lazy(
+  () => import(/* webpackChunkName: "ThemeList" */ 'src/pages/ThemeList'),
 );
 
 const DashboardList = lazy(
@@ -116,6 +127,10 @@ const Tags = lazy(
   () => import(/* webpackChunkName: "Tags" */ 'src/pages/Tags'),
 );
 
+const Extensions = lazy(
+  () => import(/* webpackChunkName: "Tags" */ 'src/extensions/ExtensionsList'),
+);
+
 const RowLevelSecurityList = lazy(
   () =>
     import(
@@ -123,17 +138,74 @@ const RowLevelSecurityList = lazy(
     ),
 );
 
+const RolesList = lazy(
+  () => import(/* webpackChunkName: "RolesList" */ 'src/pages/RolesList'),
+);
+
+const UsersList: LazyExoticComponent<any> = lazy(
+  () => import(/* webpackChunkName: "UsersList" */ 'src/pages/UsersList'),
+);
+
+const UserInfo = lazy(
+  () => import(/* webpackChunkName: "UserInfo" */ 'src/pages/UserInfo'),
+);
+const ActionLogList: LazyExoticComponent<any> = lazy(
+  () => import(/* webpackChunkName: "ActionLogList" */ 'src/pages/ActionLog'),
+);
+
+const Login = lazy(
+  () => import(/* webpackChunkName: "Login" */ 'src/pages/Login'),
+);
+
+const Register = lazy(
+  () => import(/* webpackChunkName: "Register" */ 'src/pages/Register'),
+);
+
+const GroupsList: LazyExoticComponent<any> = lazy(
+  () => import(/* webpackChunkName: "GroupsList" */ 'src/pages/GroupsList'),
+);
+const UserRegistrations = lazy(
+  () =>
+    import(
+      /* webpackChunkName: "UserRegistrations" */ 'src/pages/UserRegistrations'
+    ),
+);
+
+const FileHandler = lazy(
+  () => import(/* webpackChunkName: "FileHandler" */ 'src/pages/FileHandler'),
+);
+
 type Routes = {
   path: string;
-  Component: React.ComponentType;
-  Fallback?: React.ComponentType;
-  props?: React.ComponentProps<any>;
+  Component: ComponentType;
+  Fallback?: ComponentType;
+  props?: ComponentProps<any>;
 }[];
 
 export const routes: Routes = [
   {
+    path: '/login/',
+    Component: Login,
+  },
+  {
+    path: '/register/activation/:activationHash',
+    Component: Register,
+  },
+  {
+    path: '/register/',
+    Component: Register,
+  },
+  {
+    path: '/logout/',
+    Component: Login,
+  },
+  {
     path: '/superset/welcome/',
     Component: Home,
+  },
+  {
+    path: '/superset/file-handler',
+    Component: FileHandler,
   },
   {
     path: '/dashboard/list/',
@@ -166,6 +238,10 @@ export const routes: Routes = [
   {
     path: '/csstemplatemodelview/list/',
     Component: CssTemplateList,
+  },
+  {
+    path: '/theme/list/',
+    Component: ThemeList,
   },
   {
     path: '/annotationlayer/list/',
@@ -225,6 +301,15 @@ export const routes: Routes = [
     path: '/sqllab/',
     Component: SqlLab,
   },
+  { path: '/user_info/', Component: UserInfo },
+  {
+    path: '/actionlog/list',
+    Component: ActionLogList,
+  },
+  {
+    path: '/registrations/',
+    Component: UserRegistrations,
+  },
 ];
 
 if (isFeatureEnabled(FeatureFlag.TaggingSystem)) {
@@ -238,7 +323,43 @@ if (isFeatureEnabled(FeatureFlag.TaggingSystem)) {
   });
 }
 
-const frontEndRoutes = routes
+const user = getBootstrapData()?.user;
+const authRegistrationEnabled =
+  getBootstrapData()?.common.conf.AUTH_USER_REGISTRATION;
+const isAdmin = isUserAdmin(user);
+
+if (isAdmin) {
+  routes.push(
+    {
+      path: '/roles/',
+      Component: RolesList,
+    },
+    {
+      path: '/users/',
+      Component: UsersList,
+    },
+    {
+      path: '/list_groups/',
+      Component: GroupsList,
+    },
+  );
+
+  if (isFeatureEnabled(FeatureFlag.EnableExtensions)) {
+    routes.push({
+      path: '/extensions/list/',
+      Component: Extensions,
+    });
+  }
+}
+
+if (authRegistrationEnabled) {
+  routes.push({
+    path: '/registrations/',
+    Component: UserRegistrations,
+  });
+}
+
+const frontEndRoutes: Record<string, boolean> = routes
   .map(r => r.path)
   .reduce(
     (acc, curr) => ({
@@ -248,10 +369,10 @@ const frontEndRoutes = routes
     {},
   );
 
-export function isFrontendRoute(path?: string) {
+export const isFrontendRoute = (path?: string): boolean => {
   if (path) {
     const basePath = path.split(/[?#]/)[0]; // strip out query params and link bookmarks
     return !!frontEndRoutes[basePath];
   }
   return false;
-}
+};

@@ -17,7 +17,6 @@
  * under the License.
  */
 /* eslint-disable camelcase */
-import { FeatureFlag, isFeatureEnabled } from '@superset-ui/core';
 import { chart } from 'src/components/Chart/chartReducer';
 import { initSliceEntities } from 'src/dashboard/reducers/sliceEntities';
 import { getInitialState as getInitialNativeFilterState } from 'src/dashboard/reducers/nativeFilters';
@@ -51,14 +50,13 @@ import { URL_PARAMS } from 'src/constants';
 import { getUrlParam } from 'src/utils/urlUtils';
 import { ResourceStatus } from 'src/hooks/apiResources/apiResources';
 import extractUrlParams from '../util/extractUrlParams';
-import { updateColorSchema } from './dashboardInfo';
 import updateComponentParentsList from '../util/updateComponentParentsList';
 import { FilterBarOrientation } from '../types';
 
 export const HYDRATE_DASHBOARD = 'HYDRATE_DASHBOARD';
 
 export const hydrateDashboard =
-  ({ history, dashboard, charts, dataMask, activeTabs }) =>
+  ({ history, dashboard, charts, dataMask, activeTabs, chartStates }) =>
   (dispatch, getState) => {
     const { user, common, dashboardState } = getState();
     const { metadata, position_data: positionData } = dashboard;
@@ -70,16 +68,6 @@ export const hydrateDashboard =
       // eslint-disable-next-line no-param-reassign
       chart.slice_id = chart.form_data.slice_id;
     });
-
-    if (metadata?.shared_label_colors) {
-      updateColorSchema(metadata, metadata?.shared_label_colors);
-    }
-
-    // Priming the color palette with user's label-color mapping provided in
-    // the dashboard's JSON metadata
-    if (metadata?.label_colors) {
-      updateColorSchema(metadata, metadata?.label_colors);
-    }
 
     // new dash: position_json could be {} or null
     const layout =
@@ -237,20 +225,22 @@ export const hydrateDashboard =
       directPathToChild.push(directLinkComponentId);
     }
 
+    const chartCustomizations = metadata?.chart_customization_config || [];
+    const filters = metadata?.native_filter_configuration || [];
+    const combinedFilters = [...filters, ...chartCustomizations];
+
     const nativeFilters = getInitialNativeFilterState({
-      filterConfig: metadata?.native_filter_configuration || [],
+      filterConfig: combinedFilters,
     });
 
-    if (isFeatureEnabled(FeatureFlag.DashboardCrossFilters)) {
-      const { chartConfiguration, globalChartConfiguration } =
-        getCrossFiltersConfiguration(
-          dashboardLayout.present,
-          metadata,
-          chartQueries,
-        );
-      metadata.chart_configuration = chartConfiguration;
-      metadata.global_chart_configuration = globalChartConfiguration;
-    }
+    const { chartConfiguration, globalChartConfiguration } =
+      getCrossFiltersConfiguration(
+        dashboardLayout.present,
+        metadata,
+        chartQueries,
+      );
+    metadata.chart_configuration = chartConfiguration;
+    metadata.global_chart_configuration = globalChartConfiguration;
 
     const { roles } = user;
     const canEdit = canUserEditDashboard(dashboard, user);
@@ -275,6 +265,7 @@ export const hydrateDashboard =
             'Superset',
             roles,
           ),
+          dash_export_perm: findPermission('can_export', 'Dashboard', roles),
           superset_can_explore: findPermission(
             'can_explore',
             'Superset',
@@ -288,13 +279,10 @@ export const hydrateDashboard =
           superset_can_csv: findPermission('can_csv', 'Superset', roles),
           common: {
             // legacy, please use state.common instead
-            flash_messages: common?.flash_messages,
             conf: common?.conf,
           },
           filterBarOrientation:
-            (isFeatureEnabled(FeatureFlag.HorizontalFilterBar) &&
-              metadata.filter_bar_orientation) ||
-            FilterBarOrientation.Vertical,
+            metadata.filter_bar_orientation || FilterBarOrientation.Vertical,
           crossFiltersEnabled,
         },
         dataMask,
@@ -323,7 +311,9 @@ export const hydrateDashboard =
           isRefreshing: false,
           isFiltersRefreshing: false,
           activeTabs: activeTabs || dashboardState?.activeTabs || [],
-          datasetsStatus: ResourceStatus.Loading,
+          datasetsStatus:
+            dashboardState?.datasetsStatus || ResourceStatus.Loading,
+          chartStates: chartStates || dashboardState?.chartStates || {},
         },
         dashboardLayout,
       },

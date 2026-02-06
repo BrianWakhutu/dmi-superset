@@ -16,12 +16,11 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { OptionName } from 'echarts/types/src/util/types';
+import type { OptionName } from 'echarts/types/src/util/types';
 import {
   AnnotationLayer,
   AxisType,
   ContributionType,
-  QueryFormColumn,
   QueryFormData,
   QueryFormMetric,
   TimeFormatter,
@@ -56,6 +55,7 @@ export type EchartsTimeseriesFormData = QueryFormData & {
   annotationLayers: AnnotationLayer[];
   area: boolean;
   colorScheme?: string;
+  timeShiftColor?: boolean;
   contributionMode?: ContributionType;
   forecastEnabled: boolean;
   forecastPeriods: number;
@@ -74,20 +74,25 @@ export type EchartsTimeseriesFormData = QueryFormData & {
   rowLimit: number;
   seriesType: EchartsTimeseriesSeriesType;
   stack: StackType;
+  stackDimension: string;
   timeCompare?: string[];
   tooltipTimeFormat?: string;
+  showTooltipTotal?: boolean;
+  showTooltipPercentage?: boolean;
   truncateXAxis: boolean;
   truncateYAxis: boolean;
   yAxisFormat?: string;
   xAxisForceCategorical?: boolean;
   xAxisTimeFormat?: string;
+  xAxisNumberFormat?: string;
   timeGrainSqla?: TimeGranularity;
+  forceMaxInterval?: boolean;
   xAxisBounds: [number | undefined | null, number | undefined | null];
   yAxisBounds: [number | undefined | null, number | undefined | null];
   zoomable: boolean;
   richTooltip: boolean;
   xAxisLabelRotation: number;
-  groupby: QueryFormColumn[];
+  xAxisLabelInterval: number | string;
   showValue: boolean;
   onlyTotal: boolean;
   showExtraControls: boolean;
@@ -96,8 +101,7 @@ export type EchartsTimeseriesFormData = QueryFormData & {
 } & LegendFormData &
   TitleFormData;
 
-export interface EchartsTimeseriesChartProps
-  extends BaseChartProps<EchartsTimeseriesFormData> {
+export interface EchartsTimeseriesChartProps extends BaseChartProps<EchartsTimeseriesFormData> {
   formData: EchartsTimeseriesFormData;
 }
 

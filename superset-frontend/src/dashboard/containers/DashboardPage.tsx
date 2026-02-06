@@ -16,19 +16,15 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { FC, useEffect, useMemo, useRef } from 'react';
+import { createContext, lazy, FC, useEffect, useMemo, useRef } from 'react';
 import { Global } from '@emotion/react';
 import { useHistory } from 'react-router-dom';
-import {
-  CategoricalColorNamespace,
-  getSharedLabelColor,
-  SharedLabelColorSource,
-  t,
-  useTheme,
-} from '@superset-ui/core';
+import { t } from '@apache-superset/core';
+import { useTheme } from '@apache-superset/core/ui';
 import { useDispatch, useSelector } from 'react-redux';
+import { createSelector } from '@reduxjs/toolkit';
 import { useToasts } from 'src/components/MessageToasts/withToasts';
-import Loading from 'src/components/Loading';
+import { Loading } from '@superset-ui/core/components';
 import {
   useDashboard,
   useDashboardCharts,
@@ -37,7 +33,11 @@ import {
 import { hydrateDashboard } from 'src/dashboard/actions/hydrate';
 import { setDatasources } from 'src/dashboard/actions/datasources';
 import injectCustomCss from 'src/dashboard/util/injectCustomCss';
-
+import {
+  getAllActiveFilters,
+  getRelevantDataMask,
+} from 'src/dashboard/util/activeAllDashboardFilters';
+import { getActiveFilters } from 'src/dashboard/util/activeDashboardFilters';
 import { LocalStorageKeys, setItem } from 'src/utils/localStorageHelpers';
 import { URL_PARAMS } from 'src/constants';
 import { getUrlParam } from 'src/utils/urlUtils';
@@ -47,8 +47,10 @@ import {
   getPermalinkValue,
 } from 'src/dashboard/components/nativeFilters/FilterBar/keyValue';
 import DashboardContainer from 'src/dashboard/containers/Dashboard';
+import CrudThemeProvider from 'src/components/CrudThemeProvider';
+import type { DashboardChartStates } from 'src/dashboard/types/chartState';
 
-import shortid from 'shortid';
+import { nanoid } from 'nanoid';
 import { RootState } from '../types';
 import {
   chartContextMenuStyles,
@@ -61,9 +63,9 @@ import SyncDashboardState, {
   getDashboardContextLocalStorage,
 } from '../components/SyncDashboardState';
 
-export const DashboardPageIdContext = React.createContext('');
+export const DashboardPageIdContext = createContext('');
 
-const DashboardBuilder = React.lazy(
+const DashboardBuilder = lazy(
   () =>
     import(
       /* webpackChunkName: "DashboardContainer" */
@@ -72,20 +74,52 @@ const DashboardBuilder = React.lazy(
     ),
 );
 
-const originalDocumentTitle = document.title;
-
 type PageProps = {
   idOrSlug: string;
 };
+
+// TODO: move to Dashboard.jsx when it's refactored to functional component
+const selectRelevantDatamask = createSelector(
+  (state: RootState) => state.dataMask, // the first argument accesses relevant data from global state
+  dataMask => getRelevantDataMask(dataMask, 'ownState'), // the second parameter conducts the transformation
+);
+
+const selectChartConfiguration = (state: RootState) =>
+  state.dashboardInfo.metadata?.chart_configuration;
+const selectNativeFilters = (state: RootState) => state.nativeFilters.filters;
+const selectDataMask = (state: RootState) => state.dataMask;
+const selectAllSliceIds = (state: RootState) => state.dashboardState.sliceIds;
+// TODO: move to Dashboard.jsx when it's refactored to functional component
+const selectActiveFilters = createSelector(
+  [
+    selectChartConfiguration,
+    selectNativeFilters,
+    selectDataMask,
+    selectAllSliceIds,
+  ],
+  (chartConfiguration, nativeFilters, dataMask, allSliceIds) => ({
+    ...getActiveFilters(),
+    ...getAllActiveFilters({
+      // eslint-disable-next-line camelcase
+      chartConfiguration,
+      nativeFilters,
+      dataMask,
+      allSliceIds,
+    }),
+  }),
+);
 
 export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
   const theme = useTheme();
   const dispatch = useDispatch();
   const history = useHistory();
-  const dashboardPageId = useMemo(() => shortid.generate(), []);
-  const hasDashboardInfoInitiated = useSelector<RootState, Boolean>(
+  const dashboardPageId = useMemo(() => nanoid(), []);
+  const hasDashboardInfoInitiated = useSelector<RootState, boolean>(
     ({ dashboardInfo }) =>
       dashboardInfo && Object.keys(dashboardInfo).length > 0,
+  );
+  const dashboardTheme = useSelector(
+    (state: RootState) => state.dashboardInfo.theme,
   );
   const { addDangerToast } = useToasts();
   const { result: dashboard, error: dashboardApiError } =
@@ -101,7 +135,12 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
 
   const error = dashboardApiError || chartsApiError;
   const readyToRender = Boolean(dashboard && charts);
-  const { dashboard_title, css, metadata, id = 0 } = dashboard || {};
+  const { dashboard_title, id = 0 } = dashboard || {};
+
+  // Get CSS from dashboardInfo (unified properties location)
+  const css =
+    useSelector((state: RootState) => state.dashboardInfo.css) ||
+    dashboard?.css;
 
   useEffect(() => {
     // mark tab id as redundant when user closes browser tab - a new id will be
@@ -137,10 +176,13 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
       // activeTabs is initialized with undefined so that it doesn't override
       // the currently stored value when hydrating
       let activeTabs: string[] | undefined;
+      let chartStates: DashboardChartStates | undefined;
+      let anchor: string | undefined;
       if (permalinkKey) {
         const permalinkValue = await getPermalinkValue(permalinkKey);
-        if (permalinkValue) {
-          ({ dataMask, activeTabs } = permalinkValue.state);
+        if (permalinkValue?.state) {
+          ({ dataMask, activeTabs, chartStates, anchor } =
+            permalinkValue.state);
         }
       } else if (nativeFilterKeyValue) {
         dataMask = await getFilterValue(id, nativeFilterKeyValue);
@@ -160,8 +202,20 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
             charts,
             activeTabs,
             dataMask,
+            chartStates,
           }),
         );
+
+        // Scroll to anchor element if specified in permalink state
+        if (anchor) {
+          // Use setTimeout to ensure the DOM has been updated after hydration
+          setTimeout(() => {
+            const element = document.getElementById(anchor);
+            if (element) {
+              element.scrollIntoView({ behavior: 'smooth' });
+            }
+          }, 0);
+        }
       }
       return null;
     }
@@ -169,14 +223,27 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readyToRender]);
 
+  // Capture original title before any effects run
+  const originalTitle = useMemo(() => document.title, []);
+
+  // Update document title when dashboard title changes
   useEffect(() => {
     if (dashboard_title) {
       document.title = dashboard_title;
     }
-    return () => {
-      document.title = originalDocumentTitle;
-    };
   }, [dashboard_title]);
+
+  // Restore original title on unmount
+  useEffect(
+    () => () => {
+      document.title =
+        originalTitle ||
+        theme?.brandAppName ||
+        theme?.brandLogoAlt ||
+        'Superset';
+    },
+    [originalTitle, theme?.brandAppName, theme?.brandLogoAlt],
+  );
 
   useEffect(() => {
     if (typeof css === 'string') {
@@ -188,19 +255,6 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
   }, [css]);
 
   useEffect(() => {
-    const sharedLabelColor = getSharedLabelColor();
-    sharedLabelColor.source = SharedLabelColorSource.Dashboard;
-    return () => {
-      // clean up label color
-      const categoricalNamespace = CategoricalColorNamespace.getNamespace(
-        metadata?.color_namespace,
-      );
-      categoricalNamespace.resetColors();
-      sharedLabelColor.clear();
-    };
-  }, [metadata?.color_namespace]);
-
-  useEffect(() => {
     if (datasetsApiError) {
       addDangerToast(
         t('Error loading chart datasources. Filters may not work correctly.'),
@@ -210,26 +264,51 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
     }
   }, [addDangerToast, datasets, datasetsApiError, dispatch]);
 
-  if (error) throw error; // caught in error boundary
-  if (!readyToRender || !hasDashboardInfoInitiated) return <Loading />;
+  const relevantDataMask = useSelector(selectRelevantDatamask);
+  const activeFilters = useSelector(selectActiveFilters);
 
+  if (error) throw error; // caught in error boundary
+
+  const globalStyles = useMemo(
+    () => [
+      filterCardPopoverStyle(),
+      headerStyles(theme),
+      chartContextMenuStyles(theme),
+      focusStyle(theme),
+      chartHeaderStyles(theme),
+    ],
+    [theme],
+  );
+
+  if (error) throw error; // caught in error boundary
+
+  const DashboardBuilderComponent = useMemo(() => <DashboardBuilder />, []);
   return (
     <>
-      <Global
-        styles={[
-          filterCardPopoverStyle(theme),
-          headerStyles(theme),
-          chartContextMenuStyles(theme),
-          focusStyle(theme),
-          chartHeaderStyles(theme),
-        ]}
-      />
-      <SyncDashboardState dashboardPageId={dashboardPageId} />
-      <DashboardPageIdContext.Provider value={dashboardPageId}>
-        <DashboardContainer>
-          <DashboardBuilder />
-        </DashboardContainer>
-      </DashboardPageIdContext.Provider>
+      <Global styles={globalStyles} />
+      {readyToRender && hasDashboardInfoInitiated ? (
+        <>
+          <SyncDashboardState dashboardPageId={dashboardPageId} />
+          <DashboardPageIdContext.Provider value={dashboardPageId}>
+            <CrudThemeProvider
+              themeId={
+                dashboardTheme !== undefined
+                  ? dashboardTheme?.id
+                  : dashboard?.theme?.id
+              }
+            >
+              <DashboardContainer
+                activeFilters={activeFilters}
+                ownDataCharts={relevantDataMask}
+              >
+                {DashboardBuilderComponent}
+              </DashboardContainer>
+            </CrudThemeProvider>
+          </DashboardPageIdContext.Provider>
+        </>
+      ) : (
+        <Loading />
+      )}
     </>
   );
 };

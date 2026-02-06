@@ -16,7 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef, MouseEvent } from 'react';
+
 import { useDispatch, useSelector } from 'react-redux';
 import { QueryEditor, SqlLabRootState } from 'src/SqlLab/types';
 import { ExplorePageState } from 'src/explore/types';
@@ -24,10 +25,11 @@ import { RootState } from 'src/dashboard/types';
 import { reRunQuery } from 'src/SqlLab/actions/sqlLab';
 import { triggerQuery } from 'src/components/Chart/chartAction';
 import { onRefresh } from 'src/dashboard/actions/dashboardState';
-import { QueryResponse, t } from '@superset-ui/core';
+import { t } from '@apache-superset/core';
+import { QueryResponse } from '@superset-ui/core';
 
-import { ErrorMessageComponentProps } from './types';
-import ErrorAlert from './ErrorAlert';
+import type { ErrorMessageComponentProps } from './types';
+import { ErrorAlert } from './ErrorAlert';
 
 interface OAuth2RedirectExtra {
   url: string;
@@ -58,7 +60,7 @@ interface OAuth2RedirectExtra {
  * by the backend and sent from the opened tab to the original tab. For extra security,
  * we also check that the source of the message is the opened tab via a ref.
  */
-function OAuth2RedirectMessage({
+export function OAuth2RedirectMessage({
   error,
   source,
 }: ErrorMessageComponentProps<OAuth2RedirectExtra>) {
@@ -67,7 +69,7 @@ function OAuth2RedirectMessage({
 
   // store a reference to the OAuth2 browser tab, so we can check that the success
   // message is coming from it
-  const handleOAuthClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
+  const handleOAuthClick = (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
     oAuthTab.current = window.open(extra.url, '_blank');
   };
@@ -161,19 +163,16 @@ function OAuth2RedirectMessage({
       >
         provide authorization
       </a>{' '}
-      in order to run this query.
+      in order to run this operation.
     </>
   );
 
   return (
     <ErrorAlert
-      title={t('Authorization needed')}
-      subtitle={subtitle}
-      level={level}
-      source={source}
-      body={body}
+      errorType={t('Authorization needed')}
+      message={subtitle}
+      type={level}
+      description={body}
     />
   );
 }
-
-export default OAuth2RedirectMessage;
